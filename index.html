@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ride Merger</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1d232b; --muted: #5d6875; --border: #dde2e8;
+    --accent: #e8590c; --ride1: #1c7ed6; --gap: #e03131; --ride2: #2f9e44; --error-bg: #fff0f0; --error: #c92a2a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #14171b; --panel: #1d2127; --text: #e6e9ed; --muted: #9aa4b0; --border: #2e343c;
+      --accent: #ff8a3d; --ride1: #4dabf7; --gap: #ff6b6b; --ride2: #51cf66; --error-bg: #3a1d1d; --error: #ff8787;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #14171b; --panel: #1d2127; --text: #e6e9ed; --muted: #9aa4b0; --border: #2e343c;
+    --accent: #ff8a3d; --ride1: #4dabf7; --gap: #ff6b6b; --ride2: #51cf66; --error-bg: #3a1d1d; --error: #ff8787;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  header { padding: 16px 16px 4px; }
+  h1 { font-size: 20px; margin: 0; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+  main { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px; padding: 16px; }
+  @media (max-width: 860px) { main { grid-template-columns: minmax(0, 1fr); } }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; min-width: 0; }
+  label, .lbl { display: block; font-weight: 600; font-size: 13px; margin: 14px 0 4px; }
+  .lbl:first-child { margin-top: 0; }
+  .hint { font-weight: 400; color: var(--muted); }
+  .small { font-size: 12px; margin-top: 4px; }
+  .pick { display: flex; gap: 8px; flex-wrap: wrap; }
+  .pick label { margin: 0; font-weight: 600; padding: 7px 12px; border: 1px solid var(--accent); color: var(--accent);
+    border-radius: 6px; cursor: pointer; font-size: 13px; }
+  .pick input { display: none; }
+  input[type=number] { width: 100%; font: inherit; color: var(--text); padding: 6px 8px; border: 1px solid var(--border);
+    border-radius: 6px; background: var(--bg); }
+  .row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .row label { margin-top: 14px; }
+  .check { display: flex; gap: 8px; align-items: flex-start; font-weight: 400; margin-top: 14px; }
+  .files { margin: 6px 0 0; padding: 0; list-style: none; font-size: 12px; color: var(--muted); max-height: 140px; overflow: auto; }
+  .files li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  button, .btn { display: block; margin-top: 16px; width: 100%; padding: 10px; font: inherit; font-weight: 600; text-align: center;
+    color: #fff; background: var(--accent); border: 0; border-radius: 8px; cursor: pointer; text-decoration: none; }
+  button:disabled { opacity: .6; cursor: wait; }
+  .btn.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+  .error { margin-top: 12px; padding: 10px; border-radius: 6px; background: var(--error-bg); color: var(--error); font-size: 13px; display: none; }
+  #map { height: 460px; border-radius: 10px; border: 1px solid var(--border); }
+  @media (max-width: 860px) { #map { height: 340px; } }
+  .right { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+  .legend span::before { content: ""; display: inline-block; width: 18px; height: 4px; border-radius: 2px; margin-right: 6px; vertical-align: middle; background: var(--c); }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tr.gap td:first-child { color: var(--gap); font-weight: 600; }
+  tr.stop td { color: var(--muted); }
+  tr.total td { font-weight: 700; border-bottom: 0; }
+  .notes { margin: 10px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+  .chart-wrap { position: relative; height: 220px; margin-top: 12px; }
+  #results { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Ride Merger</h1>
+  <p>Join up to 10 activities and fill the missing parts with your GPX tracks at constant power. Your files are read in this browser only and never uploaded.</p>
+</header>
+<main>
+  <form class="panel" id="form">
+    <span class="lbl">Activities <span class="hint">(2–10 .fit/.gpx exports)</span></span>
+    <div class="pick">
+      <label>Choose folder<input type="file" id="act-folder" webkitdirectory directory multiple></label>
+      <label>Choose files<input type="file" id="act-files" accept=".fit,.gpx,application/octet-stream,application/gpx+xml" multiple></label>
+    </div>
+    <ul class="files" id="act-list"><li>Order doesn't matter, they're sorted by start time.</li></ul>
+
+    <span class="lbl">Gap tracks <span class="hint">(.gpx, any number, either direction)</span></span>
+    <div class="pick"><label>Choose files<input type="file" id="gap-files" accept=".gpx,application/gpx+xml" multiple></label></div>
+    <ul class="files" id="gap-list"><li>Each track is matched to the gap whose ends it passes. Activities within 200 m of each other need none.</li></ul>
+
+    <div class="row">
+      <div><label for="power">Power W</label><input type="number" id="power" value="200" min="30" max="1000" step="5"></div>
+      <div><label for="rider">Rider kg</label><input type="number" id="rider" value="80" min="30" max="200" step="0.5"></div>
+      <div><label for="bike">Bike kg</label><input type="number" id="bike" value="9" min="0" max="40" step="0.5"></div>
+    </div>
+    <label class="check"><input type="checkbox" id="shift">
+      <span>Move each activity to start right after the previous one or its gap <span class="hint">(changes recorded times, removes stops)</span></span></label>
+    <button type="submit" id="go">Merge</button>
+    <div class="error" id="error"></div>
+    <div id="dl"></div>
+  </form>
+
+  <div class="right">
+    <div id="map"></div>
+    <div class="legend">
+      <span style="--c: var(--ride1)">Recorded (activities alternate blue / green)</span>
+      <span style="--c: var(--gap)">Filled gap (dashed)</span>
+    </div>
+    <div class="panel" id="results">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Part</th><th>Time</th><th>Distance</th><th>Details</th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <ul class="notes" id="notes"></ul>
+      <div class="chart-wrap"><canvas id="chart"></canvas></div>
+    </div>
+  </div>
+</main>
+
+<script>
+// ---- core ---- (no DOM access except DOMParser; kept testable outside the page)
+const RM = (() => {
+  const R_EARTH = 6371008.8, MAX_ACTIVITIES = 10, JOIN_M = 200, SNAP_M = 500;
+  const FIT_EPOCH_MS = Date.UTC(1989, 11, 31);
+
+  const rad = d => d * Math.PI / 180;
+  function haversine(a, b) {
+    const p1 = rad(a[0]), p2 = rad(b[0]), dp = p2 - p1, dl = rad(b[1] - a[1]);
+    const h = Math.sin(dp / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
+    return 2 * R_EARTH * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+
+  // ---------- FIT: record messages only (timestamp, position, altitude, hr, cadence, power)
+  function parseFit(buf) {
+    const dv = new DataView(buf), u8 = new Uint8Array(buf);
+    const hdr = u8[0], dataEnd = hdr + dv.getUint32(4, true);
+    const defs = {}, out = [];
+    let pos = hdr, lastTs = null;
+    const SIZES = { 0: 1, 1: 1, 2: 1, 3: 2, 4: 2, 5: 4, 6: 4, 7: 1, 8: 4, 9: 8, 10: 1, 11: 2, 12: 4, 13: 1, 14: 8, 15: 8, 16: 8 };
+    function readNum(base, at, size, le) {
+      const t = base & 0x1f;
+      if (size !== SIZES[t]) return null;            // arrays / odd sizes: not needed here
+      switch (t) {
+        case 0: case 2: case 10: case 13: { const v = dv.getUint8(at); return v === 0xff && t !== 13 ? null : v; }
+        case 1: { const v = dv.getInt8(at); return v === 0x7f ? null : v; }
+        case 3: { const v = dv.getInt16(at, le); return v === 0x7fff ? null : v; }
+        case 4: case 11: { const v = dv.getUint16(at, le); return v === 0xffff && t === 4 ? null : v; }
+        case 5: { const v = dv.getInt32(at, le); return v === 0x7fffffff ? null : v; }
+        case 6: case 12: { const v = dv.getUint32(at, le); return v === 0xffffffff && t === 6 ? null : v; }
+        case 8: { const v = dv.getFloat32(at, le); return Number.isFinite(v) ? v : null; }
+        default: return null;
+      }
+    }
+    while (pos < dataEnd) {
+      const h = u8[pos++];
+      if (h & 0x80) {                                  // compressed timestamp data message
+        const def = defs[(h >> 5) & 3];
+        if (!def) throw new Error("FIT: data before definition");
+        const off = h & 0x1f;
+        if (lastTs !== null) lastTs = lastTs + ((off - (lastTs & 0x1f)) & 0x1f);
+        readMsg(def, pos, lastTs); pos += def.len;
+      } else if (h & 0x40) {                           // definition message
+        const local = h & 0x0f, dev = h & 0x20;
+        const le = u8[pos + 1] === 0, gnum = le ? dv.getUint16(pos + 2, true) : dv.getUint16(pos + 2, false);
+        const n = u8[pos + 4]; pos += 5;
+        const fields = []; let len = 0;
+        for (let i = 0; i < n; i++, pos += 3) { fields.push({ num: u8[pos], size: u8[pos + 1], base: u8[pos + 2], off: len }); len += u8[pos + 1]; }
+        if (dev) { const nd = u8[pos++]; for (let i = 0; i < nd; i++, pos += 3) len += u8[pos + 1]; }
+        defs[local] = { gnum, le, fields, len };
+      } else {
+        const def = defs[h & 0x0f];
+        if (!def) throw new Error("FIT: data before definition");
+        readMsg(def, pos, null); pos += def.len;
+      }
+    }
+    function readMsg(def, at, compressedTs) {
+      const v = {};
+      for (const f of def.fields) v[f.num] = readNum(f.base, at + f.off, f.size, def.le);
+      if (v[253] != null) lastTs = v[253];
+      if (def.gnum !== 20) return;                     // 20 = record
+      const ts = v[253] ?? compressedTs;
+      if (ts == null || v[0] == null || v[1] == null) return;
+      const alt = v[78] != null ? v[78] / 5 - 500 : v[2] != null ? v[2] / 5 - 500 : null;
+      out.push({ t: FIT_EPOCH_MS + ts * 1000, lat: v[0] * 180 / 2 ** 31, lon: v[1] * 180 / 2 ** 31, ele: alt,
+                 hr: v[3] ?? null, cad: v[4] ?? null, power: v[7] ?? null });
+    }
+    return out;
+  }
+
+  // ---------- GPX
+  const local = el => el.localName || el.nodeName.replace(/^.*:/, "");
+  function childText(el, name) {
+    for (const c of Array.from(el.getElementsByTagName("*"))) if (local(c) === name) return c.textContent.trim();
+    return null;
+  }
+  function gpxPoints(text) {
+    const doc = new DOMParser().parseFromString(text, "application/xml");
+    const all = Array.from(doc.getElementsByTagName("*"));
+    let pts = all.filter(e => local(e) === "trkpt");
+    if (!pts.length) pts = all.filter(e => local(e) === "rtept");
+    return pts;
+  }
+  function parseGpxRide(text, name) {
+    const out = [];
+    for (const p of gpxPoints(text)) {
+      const time = childText(p, "time");
+      if (!time) continue;
+      const num = k => { const s = childText(p, k); return s === null || s === "" ? null : Number(s); };
+      out.push({ t: Date.parse(time), lat: +p.getAttribute("lat"), lon: +p.getAttribute("lon"), ele: num("ele"),
+                 hr: num("hr"), cad: num("cad"), power: num("power") });
+    }
+    if (!out.length) throw new Error(`${name}: no timestamped track points (is this a route instead of an activity?)`);
+    return out;
+  }
+  function parseGpxTrack(text, name) {
+    const out = gpxPoints(text).map(p => { const e = childText(p, "ele");
+      return [+p.getAttribute("lat"), +p.getAttribute("lon"), e === null || e === "" ? null : Number(e)]; });
+    if (out.length < 2) throw new Error(`${name}: no track or route points found`);
+    return out;
+  }
+  function loadActivity(name, buf) {
+    const u8 = new Uint8Array(buf);
+    const isFit = u8.length > 12 && String.fromCharCode(u8[8], u8[9], u8[10], u8[11]) === ".FIT";
+    const rec = isFit ? parseFit(buf) : parseGpxRide(new TextDecoder().decode(u8), name);
+    if (!rec.length) throw new Error(`${name}: no GPS points`);
+    rec.sort((a, b) => a.t - b.t);
+    return rec;
+  }
+
+  // ---------- gap track trimming (handles out-and-back / round trips)
+  function passes(track, q, maxSnap) {
+    const d = track.map(p => haversine(p, q)), out = [];
+    let run = [];
+    for (let k = 0; k <= d.length; k++) {
+      if (k < d.length && d[k] <= maxSnap) run.push(k);
+      else if (run.length) { out.push(run.reduce((a, b) => d[b] < d[a] ? b : a)); run = []; }
+    }
+    return [out, d];
+  }
+  function cumDist(pts) { const c = [0]; for (let i = 1; i < pts.length; i++) c.push(c[i - 1] + haversine(pts[i - 1], pts[i])); return c; }
+  function cutTrack(track, start, end, maxSnap = SNAP_M) {
+    const [ps, ds] = passes(track, start, maxSnap), [pe, de] = passes(track, end, maxSnap);
+    if (!ps.length) throw new Error(`gap track passes ${Math.round(Math.min(...ds))} m from the end of the previous activity`);
+    if (!pe.length) throw new Error(`gap track passes ${Math.round(Math.min(...de))} m from the start of the next activity`);
+    const cum = cumDist(track);
+    let best = null;
+    for (const i of ps) for (const j of pe) if (i < j && (!best || cum[j] - cum[i] < best[0])) best = [cum[j] - cum[i], i, j];
+    let part, i, j, reversed = false;
+    if (best) { [, i, j] = best; part = track.slice(i, j + 1); }
+    else {
+      for (const a of ps) for (const b of pe) if (b < a && (!best || cum[a] - cum[b] < best[0])) best = [cum[a] - cum[b], a, b];
+      [, i, j] = best; part = track.slice(j, i + 1).reverse(); reversed = true;
+    }
+    return { route: [[start[0], start[1], null], ...part, [end[0], end[1], null]], offA: ds[i], offB: de[j], reversed };
+  }
+  function trackFit(track, end, start) {
+    let a = Infinity, b = Infinity;
+    for (const p of track) { a = Math.min(a, haversine(p, end)); b = Math.min(b, haversine(p, start)); }
+    return [a, b];
+  }
+  function fillElevation(pts, eStart, eEnd) {
+    const have = pts.map((p, k) => p[2] != null ? k : -1).filter(k => k >= 0);
+    if (!have.length) { const n = pts.length - 1; return pts.map((p, k) => [p[0], p[1], eStart + (eEnd - eStart) * k / n]); }
+    return pts.map((p, k) => {
+      if (p[2] != null) return p;
+      let prev = null, next = null;
+      for (const h of have) { if (h < k) prev = h; else if (h > k && next === null) next = h; }
+      const ref = next === null || (prev !== null && k - prev <= next - k) ? prev : next;
+      return [p[0], p[1], pts[ref][2]];
+    });
+  }
+
+  // ---------- constant-power pacing
+  function riderSpeed(power, grade, r) {
+    const th = Math.atan(grade), fg = r.mass * 9.81 * (r.crr * Math.cos(th) + Math.sin(th)), p = power * r.eff;
+    let lo = 0, hi = 40;
+    for (let i = 0; i < 60; i++) { const v = (lo + hi) / 2; if (v * (fg + 0.5 * r.rho * r.cda * v * v) < p) lo = v; else hi = v; }
+    return Math.min(r.vmax, Math.max(r.vmin, (lo + hi) / 2));
+  }
+  function profile(pts, step = 10, smoothM = 100) {
+    const cum = cumDist(pts), n = Math.floor(cum[cum.length - 1] / step) + 1, d = [], e = [];
+    let j = 0;
+    for (let s = 0; s < n; s++) {
+      const x = s * step; d.push(x);
+      while (j < cum.length - 2 && cum[j + 1] < x) j++;
+      const seg = cum[j + 1] - cum[j] || 1, f = Math.min(1, Math.max(0, (x - cum[j]) / seg));
+      e.push(pts[j][2] + f * (pts[j + 1][2] - pts[j][2]));
+    }
+    const k = Math.max(1, Math.floor(smoothM / step / 2));   // smooth DEM noise that would fake steep grades
+    const es = e.map((_, i) => { const w = e.slice(Math.max(0, i - k), i + k + 1); return w.reduce((a, b) => a + b, 0) / w.length; });
+    const grade = []; for (let i = 0; i < es.length - 1; i++) grade.push((es[i + 1] - es[i]) / step);
+    return { d, grade };
+  }
+  function fillGapPower(route, t0, power, rider, step = 10) {
+    const { d, grade } = profile(route, step), t = [0];
+    for (const g of grade) t.push(t[t.length - 1] + step / riderSpeed(power, g, rider));
+    const cum = cumDist(route), total = cum[cum.length - 1], n = Math.floor(t[t.length - 1]), out = [];
+    let a = 0, b = 0;
+    for (let s = 1; s <= n; s++) {
+      while (a < t.length - 2 && t[a + 1] < s) a++;
+      const fa = Math.min(1, Math.max(0, (s - t[a]) / ((t[a + 1] - t[a]) || 1)));
+      const dist = d[a] + fa * (d[a + 1] - d[a]);
+      while (b < cum.length - 2 && cum[b + 1] < dist) b++;
+      const f = Math.min(1, (dist - cum[b]) / ((cum[b + 1] - cum[b]) || 1)), p = route[b], q = route[b + 1];
+      out.push({ t: t0 + s * 1000, lat: p[0] + f * (q[0] - p[0]), lon: p[1] + f * (q[1] - p[1]),
+                 ele: p[2] == null || q[2] == null ? null : p[2] + f * (q[2] - p[2]), hr: null, cad: null, power: null, filled: true });
+    }
+    return { gap: out, total };
+  }
+
+  const km = rec => { let s = 0; for (let i = 1; i < rec.length; i++) s += haversine([rec[i - 1].lat, rec[i - 1].lon], [rec[i].lat, rec[i].lon]); return s / 1000; };
+  function fmtDelta(ms) {
+    const sign = ms < 0 ? "−" : "+", s = Math.round(Math.abs(ms) / 1000);
+    const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+    return sign + [d && `${d} d`, h && `${h} h`, `${m} min`].filter(Boolean).join(" ");
+  }
+
+  // ---------- merge
+  function mergeMany(activities, gapTracks, opts) {
+    const { power, mass, shift = false, cda = 0.32, crr = 0.005 } = opts;
+    if (activities.length < 2 || activities.length > MAX_ACTIVITIES)
+      throw new Error(`need 2 to ${MAX_ACTIVITIES} activities, got ${activities.length}`);
+    const acts = activities.slice().sort((x, y) => x.rec[0].t - y.rec[0].t);
+    const rider = { mass, cda, crr, rho: 1.2, eff: 0.97, vmin: 1.5, vmax: 60 / 3.6 };
+    const notes = [], unused = gapTracks.map((_, k) => k);
+    const parts = [{ kind: "activity", n: 1, name: acts[0].name, rec: acts[0].rec }];
+    for (let i = 2; i <= acts.length; i++) {
+      let nxt = acts[i - 1].rec;
+      const prev = parts.filter(p => p.kind === "activity").pop().rec;
+      const end = [prev[prev.length - 1].lat, prev[prev.length - 1].lon], start = [nxt[0].lat, nxt[0].lon];
+      const apart = haversine(end, start);
+      let ready = prev[prev.length - 1].t, gapAdded = false;
+      if (apart > JOIN_M) {
+        let best = null;
+        for (const k of unused) { const o = trackFit(gapTracks[k].pts, end, start); if (Math.max(...o) <= SNAP_M && (!best || o[0] + o[1] < best[0])) best = [o[0] + o[1], k]; }
+        if (!best) throw new Error(`no gap track covers activity ${i - 1} → ${i}: from ${end[0].toFixed(5)},${end[1].toFixed(5)} ` +
+          `to ${start[0].toFixed(5)},${start[1].toFixed(5)}, ${(apart / 1000).toFixed(1)} km apart`);
+        const k = best[1]; unused.splice(unused.indexOf(k), 1);
+        const cut = cutTrack(gapTracks[k].pts, end, start);
+        const route = fillElevation(cut.route, prev[prev.length - 1].ele ?? 0, nxt[0].ele ?? 0);
+        const { gap, total } = fillGapPower(route, ready, power, rider);
+        if (gap.length) {
+          let up = 0, down = 0; for (let q = 1; q < route.length; q++) { const dz = route[q][2] - route[q - 1][2]; if (dz > 0) up += dz; else down -= dz; }
+          parts.push({ kind: "gap", between: [i - 1, i], rec: gap, km: total / 1000, seconds: gap.length, avgKmh: total / gap.length * 3.6,
+            power, climb: up, descent: down,
+            source: `${gapTracks[k].name}, joins ${Math.round(cut.offA)} m / ${Math.round(cut.offB)} m${cut.reversed ? ", reversed" : ""}` });
+          ready = gap[gap.length - 1].t; gapAdded = true;
+        }
+      }
+      let wait = (nxt[0].t - ready) / 1000;
+      if (shift) {
+        const delta = ready + 1000 - nxt[0].t;
+        if (Math.abs(delta) >= 1000) { nxt = nxt.map(r => ({ ...r, t: r.t + delta })); notes.push(`activity ${i} time-shifted by ${fmtDelta(delta)}; its times are no longer the recorded ones`); }
+        wait = 1;
+      } else if (wait < 1) {
+        throw new Error(`activity ${i} starts ${Math.round(-wait / 60)} min before ${gapAdded ? "the gap ride would end" : `activity ${i - 1} ends`}; raise the power or allow shifting`);
+      } else if (wait > 12 * 3600) {
+        notes.push(`warning: activity ${i} starts ${(wait / 86400).toFixed(1)} days later; the merged file contains that stop`);
+      }
+      if (wait > 60) parts.push({ kind: "stop", before: i, seconds: wait });
+      parts.push({ kind: "activity", n: i, name: acts[i - 1].name, rec: nxt });
+    }
+    if (unused.length) notes.push("gap tracks not used (matched no gap): " + unused.map(k => gapTracks[k].name).join(", "));
+    for (const p of parts) if (p.kind === "activity") p.km = km(p.rec);
+    const merged = parts.filter(p => p.kind !== "stop").flatMap(p => p.rec);
+    return { parts, merged, notes, totalKm: parts.reduce((s, p) => s + (p.km || 0), 0) };
+  }
+
+  // ---------- GPX output
+  function gpxText(records, name) {
+    const esc = s => String(s).replace(/[<>&"]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
+    const iso = t => new Date(t).toISOString().replace(/\.\d{3}Z$/, "Z");
+    const out = ['<?xml version="1.0" encoding="UTF-8"?>',
+      '<gpx version="1.1" creator="Ride Merger" xmlns="http://www.topografix.com/GPX/1/1" xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1">',
+      `<trk><name>${esc(name)}</name><type>cycling</type>`];
+    let segFilled = null;
+    for (const r of records) {
+      const filled = !!r.filled;
+      if (filled !== segFilled) { if (segFilled !== null) out.push("</trkseg>"); out.push("<trkseg>"); segFilled = filled; }
+      let s = `<trkpt lat="${r.lat.toFixed(7)}" lon="${r.lon.toFixed(7)}">`;
+      if (r.ele != null) s += `<ele>${r.ele.toFixed(1)}</ele>`;
+      s += `<time>${iso(r.t)}</time>`;
+      let tpx = "";
+      if (r.hr != null) tpx += `<gpxtpx:hr>${r.hr}</gpxtpx:hr>`;
+      if (r.cad != null) tpx += `<gpxtpx:cad>${r.cad}</gpxtpx:cad>`;
+      let ext = tpx ? `<gpxtpx:TrackPointExtension>${tpx}</gpxtpx:TrackPointExtension>` : "";
+      if (r.power != null) ext += `<power>${r.power}</power>`;
+      if (ext) s += `<extensions>${ext}</extensions>`;
+      out.push(s + "</trkpt>");
+    }
+    out.push("</trkseg>", "</trk>", "</gpx>", "");
+    return out.join("\n");
+  }
+
+  return { haversine, parseFit, parseGpxRide, parseGpxTrack, loadActivity, cutTrack, mergeMany, gpxText, MAX_ACTIVITIES };
+})();
+// ---- end core ----
+
+// ---- page ----
+(() => {
+  const $ = id => document.getElementById(id);
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const isAct = f => /\.(fit|gpx)$/i.test(f.name), isGpx = f => /\.gpx$/i.test(f.name);
+  let actFiles = [], gapFiles = [], layers = [], chart = null, dlUrl = null;
+
+  const map = L.map("map").setView([47.6, 9.8], 9);
+  // Base maps that work from a page opened as a local file: tile.openstreetmap.org blocks requests
+  // without a Referer, and CARTO now answers with an "API key required" image.
+  const esri = "https://server.arcgisonline.com/ArcGIS/rest/services";
+  const osmAttr = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
+  const bases = {
+    "Street map": L.tileLayer(`${esri}/World_Street_Map/MapServer/tile/{z}/{y}/{x}`, {
+      maxZoom: 19, attribution: "Tiles &copy; Esri &mdash; Esri, HERE, Garmin, USGS, NGA, EPA, USDA, NPS" }),
+    "Topographic": L.tileLayer(`${esri}/World_Topo_Map/MapServer/tile/{z}/{y}/{x}`, {
+      maxZoom: 19, attribution: "Tiles &copy; Esri &mdash; Esri, HERE, Garmin, FAO, NOAA, USGS, &copy; OpenStreetMap contributors" }),
+    "OpenTopoMap": L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", {
+      subdomains: "abc", maxZoom: 17, attribution: `${osmAttr}, SRTM | &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA)` }),
+  };
+  bases["Street map"].addTo(map);
+  L.control.layers(bases, null, { position: "topright" }).addTo(map);
+
+  const esc = s => String(s).replace(/[<>&"]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
+  const list = (el, files, empty) => { el.innerHTML = files.length ? files.map(f => `<li>${esc(f.name)}</li>`).join("") : `<li>${empty}</li>`; };
+  function setActs(files) {
+    actFiles = Array.from(files).filter(isAct);
+    list($("act-list"), actFiles, "No .fit/.gpx files selected.");
+    if (actFiles.length > RM.MAX_ACTIVITIES) $("act-list").insertAdjacentHTML("afterbegin", `<li style="color:var(--error)">${actFiles.length} files — the limit is ${RM.MAX_ACTIVITIES}.</li>`);
+  }
+  $("act-folder").addEventListener("change", e => setActs(e.target.files));
+  $("act-files").addEventListener("change", e => setActs(e.target.files));
+  $("gap-files").addEventListener("change", e => { gapFiles = Array.from(e.target.files).filter(isGpx); list($("gap-list"), gapFiles, "No .gpx files selected."); });
+
+  const fmtTime = t => new Date(t).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+  const fmtClock = t => new Date(t).toLocaleTimeString([], { timeStyle: "short" });
+  const fmtDur = s => { const h = Math.floor(s / 3600), m = Math.round(s % 3600 / 60); return h ? `${h} h ${m} min` : `${m} min`; };
+  const fmtKm = x => `${x.toFixed(1)} km`;
+  const thin = (a, n) => { const st = Math.max(1, Math.floor(a.length / n)); const r = a.filter((_, i) => i % st === 0); if (r[r.length - 1] !== a[a.length - 1]) r.push(a[a.length - 1]); return r; };
+
+  $("form").addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const err = $("error"), btn = $("go");
+    err.style.display = "none";
+    const power = +$("power").value, rider = +$("rider").value, bike = +$("bike").value;
+    try {
+      if (actFiles.length < 2) throw new Error("Choose at least 2 activity files (.fit or .gpx).");
+      if (!(power >= 30 && power <= 1000 && rider >= 30 && rider <= 200 && bike >= 0 && bike <= 40))
+        throw new Error("Power must be 30–1000 W, rider 30–200 kg, bike 0–40 kg.");
+      btn.disabled = true; btn.textContent = "Merging…";
+      await new Promise(r => setTimeout(r, 20));      // let the button repaint before the work
+      const acts = [];
+      for (const f of actFiles) acts.push({ name: f.name, rec: RM.loadActivity(f.name, await f.arrayBuffer()) });
+      const gaps = [];
+      for (const f of gapFiles) gaps.push({ name: f.name, pts: RM.parseGpxTrack(await f.text(), f.name) });
+      const res = RM.mergeMany(acts, gaps, { power, mass: rider + bike, shift: $("shift").checked });
+      show(res);
+    } catch (e) {
+      err.textContent = e.message; err.style.display = "block";
+    } finally {
+      btn.disabled = false; btn.textContent = "Merge";
+    }
+  });
+
+  function show(res) {
+    layers.forEach(l => map.removeLayer(l));
+    const rec = [css("--ride1"), css("--ride2")], gapC = css("--gap");
+    const drawn = res.parts.filter(p => p.kind !== "stop");
+    let a = 0;
+    const colors = drawn.map(p => p.kind === "gap" ? gapC : rec[a++ % 2]);
+    layers = drawn.map((p, i) => L.polyline(thin(p.rec, 800).map(r => [r.lat, r.lon]), {
+      color: colors[i], weight: p.kind === "gap" ? 5 : 4, opacity: .9, dashArray: p.kind === "gap" ? "8 6" : null
+    }).bindTooltip(p.kind === "gap" ? `Gap ${p.between[0]}→${p.between[1]}` : `Activity ${p.n}: ${esc(p.name)}`, { sticky: true }).addTo(map));
+    const first = res.merged[0], last = res.merged[res.merged.length - 1];
+    layers.push(L.circleMarker([first.lat, first.lon], { radius: 6, color: colors[0], fillOpacity: 1 }).bindTooltip("Start").addTo(map));
+    layers.push(L.circleMarker([last.lat, last.lon], { radius: 6, color: colors[colors.length - 1], fillOpacity: 1 }).bindTooltip("Finish").addTo(map));
+    map.fitBounds(L.latLngBounds(res.merged.filter((_, i) => i % 20 === 0).map(r => [r.lat, r.lon])), { padding: [20, 20] });
+
+    const rows = res.parts.map(p =>
+      p.kind === "activity" ? ["", `Activity ${p.n}`, `${fmtTime(p.rec[0].t)} – ${fmtClock(p.rec[p.rec.length - 1].t)}`, fmtKm(p.km), esc(p.name)] :
+      p.kind === "gap" ? ["gap", `Gap ${p.between[0]}→${p.between[1]}`, fmtDur(p.seconds), fmtKm(p.km),
+        `${p.power} W · ${p.avgKmh.toFixed(1)} km/h · +${Math.round(p.climb)}/−${Math.round(p.descent)} m · ${esc(p.source)}`] :
+      ["stop", "Stop", fmtDur(p.seconds), "", `before activity ${p.before}`]);
+    rows.push(["total", "Total", "", fmtKm(res.totalKm), ""]);
+    $("rows").innerHTML = rows.map(r => `<tr class="${r[0]}"><td>${r[1]}</td><td class="num">${r[2]}</td><td class="num">${r[3]}</td><td>${r[4]}</td></tr>`).join("");
+    $("notes").innerHTML = res.notes.map(n => `<li>${esc(n)}</li>`).join("");
+
+    if (dlUrl) URL.revokeObjectURL(dlUrl);
+    const name = `merged_${new Date(first.t).toISOString().slice(0, 10)}.gpx`;
+    dlUrl = URL.createObjectURL(new Blob([RM.gpxText(res.merged, "Merged ride")], { type: "application/gpx+xml" }));
+    $("dl").innerHTML = `<a class="btn secondary" href="${dlUrl}" download="${name}">Download ${name}</a>`;
+    $("results").style.display = "block";
+
+    const prof = []; let dist = 0;
+    const flat = drawn.flatMap(p => p.rec.map(r => [p.kind === "gap" ? 1 : 0, r]));
+    for (let i = 1; i < flat.length; i++) {
+      const p = flat[i - 1][1], q = flat[i][1], d = RM.haversine([p.lat, p.lon], [q.lat, q.lon]), dt = (q.t - p.t) / 1000;
+      dist += d;
+      prof.push([dist / 1000, q.ele, dt > 0 && dt <= 10 ? d / dt * 3.6 : null, flat[i][0]]);
+    }
+    const P = thin(prof, 1500), part = P.map(x => x[3]);
+    if (chart) chart.destroy();
+    chart = new Chart($("chart"), {
+      type: "line",
+      data: { labels: P.map(x => x[0]), datasets: [
+        { label: "Elevation (m)", data: P.map(x => x[1]), yAxisID: "y", pointRadius: 0, borderWidth: 2, tension: .2,
+          segment: { borderColor: c => part[c.p1DataIndex] === 1 ? gapC : rec[0] }, borderColor: rec[0] },
+        { label: "Speed (km/h)", data: P.map(x => x[2]), yAxisID: "y2", pointRadius: 0, borderWidth: 1, borderColor: css("--muted") + "99" },
+      ] },
+      options: { maintainAspectRatio: false, animation: false, interaction: { mode: "index", intersect: false },
+        scales: {
+          x: { type: "linear", title: { display: true, text: "km", color: css("--muted") }, ticks: { color: css("--muted") }, grid: { color: css("--border") } },
+          y: { title: { display: true, text: "m", color: css("--muted") }, ticks: { color: css("--muted") }, grid: { color: css("--border") } },
+          y2: { position: "right", title: { display: true, text: "km/h", color: css("--muted") }, ticks: { color: css("--muted") }, grid: { display: false } },
+        },
+        plugins: { legend: { labels: { color: css("--text") } } } }
+    });
+  }
+})();
+</script>
+</body>
+</html>
